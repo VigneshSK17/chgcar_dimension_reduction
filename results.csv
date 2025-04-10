@@ -1,0 +1,5 @@
+filename,mode,dim_x,dim_y,dim_z,compressed_dim_x,compressed_dim_y,compressed_dim_z,compressed_dim_w,charge_mae,charge_mean_percentage_diff,mag_mae,mag_mean_percentage_diff
+mp-1079437_chgcar.vasp,chebyshev,48,72,80,12,18,20,64,2.0083e-05,3.8621e-04,9.9616e-09,7.4626e-04
+mp-6979_chgcar.vasp,chebyshev,60,60,140,15,15,35,64,2.5260e-05,3.9469e-04,2.9511e-10,-1.1593e-01
+mp-2217094_chgcar.vasp,chebyshev,80,84,80,20,21,20,64,1.4960e-05,1.6809e-04,1.6910e-06,-1.3780e-03
+mp-1219259_chgcar.vasp,chebyshev,72,72,112,18,18,28,64,5.8519e-05,3.8499e-04,1.1895e-08,4.7287e-04
