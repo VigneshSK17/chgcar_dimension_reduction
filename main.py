@@ -1,8 +1,9 @@
 import click
 import math
 import os
+import csv
 
-import utils
+from utils import *
 
 
 @click.command()
@@ -10,68 +11,122 @@ import utils
 @click.option("--degree", default=3, help="The degree of the 4th dimension of data created during dimension reduction")
 @click.option("--degree", default=3, help="The degree of the 4th dimension of data created during dimension reduction")
 @click.option("--mode", type=click.Choice(['chebyshev', 'lagrange', 'gaussian']), required = True)
+@click.option("--output", help="Path to save results in CSV format")
 @click.argument("path")
-def main(factor, degree, mode, path):
+def main(factor, degree, mode, output, path):
     """ Reduce dimensions of chgcars located in PATH by FACTOR with DEGREE """
+
+    # Initialize CSV file if specified
+    if output:
+        csv_file = None
+        csv_writer = None
+
+        csv_file = open(output, 'w', newline='')
+        csv_writer = csv.writer(csv_file)
+        # Write header row
+        csv_writer.writerow([
+            'filename', 'mode',
+            'dim_x', 'dim_y', 'dim_z',
+            'compressed_dim_x', 'compressed_dim_y', 'compressed_dim_z', 'compressed_dim_w',
+            'charge_mae', 'charge_mean_percentage_diff',
+            'mag_mae', 'mag_mean_percentage_diff'
+        ])
 
     if os.path.isdir(path):
         with os.scandir(path) as it:
             for chgcar in it:
-                # if "1219259" in chgcar.name:
-                    dims, charge, mag = utils.parse_chgcar(chgcar, chgcar.name.split('.')[0] + "_no_data.txt")
-                    charge, mag = utils.reshape_dims(charge, dims), utils.reshape_dims(mag, dims)
+                if ".vasp" in chgcar.name:
+                    dims, charge, mag = parse_chgcar(chgcar, chgcar.name.split('.')[0] + "_no_data.txt")
+                    charge, mag = reshape_dims(charge, dims), reshape_dims(mag, dims)
 
-                    # TODO: Add padding for datasets not divisible by 4 (for example)
-
-                    FACTOR, ORDER = 4, 3
-                    block_dims = [math.ceil(dim / FACTOR) for dim in dims]
-                    charge_padded = utils.pad_grid(charge, block_dims)
-                    mag_padded = utils.pad_grid(mag, block_dims)
+                    block_dims = [math.ceil(dim / factor) for dim in dims]
+                    charge_padded = pad_grid(charge, block_dims)
+                    mag_padded = pad_grid(mag, block_dims)
                     padded_dims = charge_padded.shape
 
                     # """ Chebyshev
                     if mode == 'chebyshev':
-                        partitioned_data_charge = utils.partition_grid(charge_padded, *block_dims)
-                        basis_charge = utils.chebyshev_basis(partitioned_data_charge, order=ORDER)
-                        coeffs_charge = utils.compute_chebyshev_coefficients(partitioned_data_charge, basis_charge)
-                        reassembled_data_charge = utils.reassemble_grid(coeffs_charge, basis_charge)
-                        reassembled_data_charge = utils.unpad_grid(reassembled_data_charge, dims)
+                        partitioned_data_charge = partition_grid(charge_padded, *block_dims)
+                        basis_charge = chebyshev_basis(partitioned_data_charge, order=degree)
+                        coeffs_charge = compute_chebyshev_coefficients(partitioned_data_charge, basis_charge)
+                        reassembled_data_charge = reassemble_grid(coeffs_charge, basis_charge)
+                        reassembled_data_charge = unpad_grid(reassembled_data_charge, dims)
 
-                        partitioned_data_mag = utils.partition_grid(mag_padded, *block_dims)
-                        basis_mag = utils.chebyshev_basis(partitioned_data_mag, order=ORDER)
-                        coeffs_mag = utils.compute_chebyshev_coefficients(partitioned_data_mag, basis_mag)
-                        reassembled_data_mag = utils.reassemble_grid(coeffs_mag, basis_mag)
-                        reassembled_data_mag = utils.unpad_grid(reassembled_data_mag, dims)
+                        partitioned_data_mag = partition_grid(mag_padded, *block_dims)
+                        basis_mag = chebyshev_basis(partitioned_data_mag, order=degree)
+                        coeffs_mag = compute_chebyshev_coefficients(partitioned_data_mag, basis_mag)
+                        reassembled_data_mag = reassemble_grid(coeffs_mag, basis_mag)
+                        reassembled_data_mag = unpad_grid(reassembled_data_mag, dims)
 
-                        print(f"{chgcar}, dims: {dims}, coeffs dims: {coeffs_charge.shape}, charge mae: {utils.mae(charge, reassembled_data_charge)}, charge mean_percetage_diff: {utils.mean_percentage_diff(charge, reassembled_data_charge)}, mag mae: {utils.mae(mag, reassembled_data_mag)}, mag mean_percentage_diff: {utils.mean_percentage_diff(mag, reassembled_data_mag)}")
+                        charge_mae_val = mae(charge, reassembled_data_charge)
+                        charge_mpd = mean_percentage_diff(charge, reassembled_data_charge)
+                        mag_mae_val = mae(mag, reassembled_data_mag)
+                        mag_mpd = mean_percentage_diff(mag, reassembled_data_mag)
 
+                        print(f"{chgcar}, dims: {dims}, coeffs dims: {coeffs_charge.shape}, charge mae: {charge_mae_val}, charge mean_percetage_diff: {charge_mpd}, mag mae: {mag_mae_val}, mag mean_percentage_diff: {mag_mpd}")
 
-                    # """
+                        if csv_writer:
+                            csv_writer.writerow([
+                                chgcar.name, 'chebyshev',
+                                dims[0], dims[1], dims[2],
+                                coeffs_charge.shape[0], coeffs_charge.shape[1], coeffs_charge.shape[2], coeffs_charge.shape[3],
+                                f"{charge_mae_val.item():.4e}", f"{charge_mpd.item():.4e}",
+                                f"{mag_mae_val.item():.4e}", f"{mag_mpd.item():.4e}"
+                            ])
 
-                    """ Lagrange
-                    compressed_data_charge = lagrange_compress_3d(charge_padded, *block_dims, ORDER)
-                    decompressed_data_charge = lagrange_decompress_3d(compressed_data_charge, padded_dims, ORDER)
-                    decompressed_data_charge = unpad_grid(decompressed_data_charge, dims)
+                    if mode == "lagrange":
+                        compressed_data_charge = lagrange_compress_3d(charge_padded, *block_dims, degree)
+                        decompressed_data_charge = lagrange_decompress_3d(compressed_data_charge, padded_dims, degree)
+                        decompressed_data_charge = unpad_grid(decompressed_data_charge, dims)
 
-                    compressed_data_mag = lagrange_compress_3d(mag_padded, *block_dims, ORDER)
-                    decompressed_data_mag = lagrange_decompress_3d(compressed_data_mag, padded_dims, ORDER)
-                    decompressed_data_mag = unpad_grid(decompressed_data_mag, dims)
+                        compressed_data_mag = lagrange_compress_3d(mag_padded, *block_dims, degree)
+                        decompressed_data_mag = lagrange_decompress_3d(compressed_data_mag, padded_dims, degree)
+                        decompressed_data_mag = unpad_grid(decompressed_data_mag, dims)
 
-                    print(f"{chgcar}, dims: {dims}, compressed dims: {compressed_data_charge.shape}, charge mae: {mae(charge, decompressed_data_charge)}, charge mean_percetage_diff: {mean_percentage_diff(charge, decompressed_data_charge)}, mag mae: {mae(mag, decompressed_data_mag)}, mag mean_percetage_diff: {mean_percentage_diff(mag, decompressed_data_mag)}")
-                    """
+                        charge_mae_val = mae(charge, decompressed_data_charge)
+                        charge_mpd = mean_percentage_diff(charge, decompressed_data_charge)
+                        mag_mae_val = mae(mag, decompressed_data_mag)
+                        mag_mpd = mean_percentage_diff(mag, decompressed_data_mag)
 
-                    """ Gaussian
-                    compressed_data_charge = gaussian_compress_3d(charge_padded, *block_dims, ORDER)
-                    decompressed_data_charge = gaussian_decompress_3d(compressed_data_charge, padded_dims, ORDER)
-                    decompressed_data_charge = unpad_grid(decompressed_data_charge, dims)
+                        print(f"{chgcar}, dims: {dims}, compressed dims: {compressed_data_charge.shape}, charge mae: {charge_mae_val}, charge mean_percetage_diff: {charge_mpd}, mag mae: {mag_mae_val}, mag mean_percentage_diff: {mag_mpd}")
 
-                    compressed_data_mag = gaussian_compress_3d(mag_padded, *block_dims, ORDER)
-                    decompressed_data_mag = gaussian_decompress_3d(compressed_data_mag, padded_dims, ORDER)
-                    decompressed_data_mag = unpad_grid(decompressed_data_mag, dims)
+                        if csv_writer:
+                            csv_writer.writerow([
+                                chgcar.name, 'lagrange',
+                                dims[0], dims[1], dims[2],
+                                compressed_data_charge.shape[0], compressed_data_charge.shape[1], compressed_data_charge.shape[2], compressed_data_charge.shape[3],
+                                f"{charge_mae_val.item():.4e}", f"{charge_mpd.item():.4e}",
+                                f"{mag_mae_val.item():.4e}", f"{mag_mpd.item():.4e}"
+                            ])
 
-                    print(f"{chgcar}, dims: {dims}, compressed dims: {compressed_data_charge.shape}, charge mae: {mae(charge, decompressed_data_charge)}, charge mean_percetage_diff: {mean_percentage_diff(charge, decompressed_data_charge)}, mag mae: {mae(mag, decompressed_data_mag)}, mag mean_percetage_diff: {mean_percentage_diff(mag, decompressed_data_mag)}")
-                    """
+                    if mode == "gaussian":
+                        compressed_data_charge = gaussian_compress_3d(charge_padded, *block_dims, degree)
+                        decompressed_data_charge = gaussian_decompress_3d(compressed_data_charge, padded_dims, degree)
+                        decompressed_data_charge = unpad_grid(decompressed_data_charge, dims)
 
+                        compressed_data_mag = gaussian_compress_3d(mag_padded, *block_dims, degree)
+                        decompressed_data_mag = gaussian_decompress_3d(compressed_data_mag, padded_dims, degree)
+                        decompressed_data_mag = unpad_grid(decompressed_data_mag, dims)
+
+                        charge_mae_val = mae(charge, decompressed_data_charge)
+                        charge_mpd = mean_percentage_diff(charge, decompressed_data_charge)
+                        mag_mae_val = mae(mag, decompressed_data_mag)
+                        mag_mpd = mean_percentage_diff(mag, decompressed_data_mag)
+
+                        print(f"{chgcar}, dims: {dims}, compressed dims: {compressed_data_charge.shape}, charge mae: {charge_mae_val}, charge mean_percetage_diff: {charge_mpd}, mag mae: {mag_mae_val}, mag mean_percentage_diff: {mag_mpd}")
+
+                        if csv_writer:
+                            csv_writer.writerow([
+                                chgcar.name, 'gaussian',
+                                dims[0], dims[1], dims[2],
+                                compressed_data_charge.shape[0], compressed_data_charge.shape[1], compressed_data_charge.shape[2], compressed_data_charge.shape[3],
+                                f"{charge_mae_val.item():.4e}", f"{charge_mpd.item():.4e}",
+                                f"{mag_mae_val.item():.4e}", f"{mag_mpd.item():.4e}"
+                            ])
+
+    # Close CSV file if it was opened
+    if csv_file:
+        csv_file.close()
 
 if __name__ == "__main__":
     main()
